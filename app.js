@@ -4,7 +4,7 @@
    measurements and left/right differences.  Everything runs in the browser (fit.js, viewer.js);
    photos are never uploaded.  Output: a small JSON for make_insole.py --app ("app": "footcapture"). */
 
-const STEPS = ["top", "side", "inner"];
+const STEPS = ["top", "arch", "side"];
 
 const TXT = {
   ko: {
@@ -14,13 +14,14 @@ const TXT = {
     infoTitle: "기본 정보", infoSub: "발 크기를 정하는 데 사용합니다.", code: "참여자 코드", codeHint: "연구자가 알려준 코드 (이름 X)",
     age: "나이", height: "키 (cm)", weight: "몸무게 (kg)", shoe: "신발 사이즈 (mm)", shoeHint: "예: 265", cont: "계속",
     L: "왼발", R: "오른발", stepOf: "단계", photos: "사진",
-    t_top: "위에서 촬영", t_side: "바깥쪽에서 촬영", t_inner: "안쪽에서 촬영",
+    t_top: "위에서 촬영", t_arch: "안쪽 아치 촬영", t_side: "바닥 옆면 촬영",
     d_top: "휴대폰을 바닥과 평행하게 들고 발 바로 위에서 찍습니다. 발끝을 점선 위쪽 끝에 맞추고 발이 점선 안에 들어오게 하세요.",
-    d_side: "휴대폰을 바닥 가까이에 세워 발 바깥쪽(새끼발가락 쪽)을 정면으로 찍습니다. 뒤꿈치부터 발끝까지 점선 안에 들어오게 하세요.",
-    d_inner: "휴대폰을 바닥 가까이에 세워 발 안쪽(엄지발가락·아치 쪽)을 정면으로 찍습니다. 뒤꿈치부터 발끝까지 점선 안에 들어오게 하세요.",
+    d_arch: "휴대폰을 세로로 들고 발 안쪽(엄지발가락 쪽)에서 비스듬히 내려다보며 찍습니다. 발끝이 위로 오게 하고 발을 점선에 맞추세요. 거리 약 30 cm.",
+    d_side: "휴대폰을 가로로 돌려 바닥까지 낮추고, 발 안쪽(아치 쪽)이 카메라를 향하게 옆에서 찍습니다. 발바닥을 노란 선에 맞추세요.",
     prep: "맨발로, 바지는 종아리까지 걷고, 발을 바닥에 평평하게 둡니다. 바닥 색이 피부색과 다르면 더 정확합니다.",
     begin: "촬영 시작", shoot: "촬영", pick: "사진 선택", camFail: "카메라를 열 수 없습니다. 사진 선택을 사용하세요.",
-    tilt: "기울기", flat: "수평", upright: "수직", fitGuide: "발을 점선에 맞추세요",
+    angleOk: "좋아요. 이 위치에서 촬영하세요", angleBad: "각도를 맞춰 주세요", target: "목표", fitGuide: "발을 점선에 맞추세요",
+    reviewTitle: "사진 확인", checks: ["발 전체가 프레임 안에 보이나요", "사진이 선명하고 초점이 맞나요", "발에 강한 그림자가 없나요", "발뒤꿈치와 모든 발가락이 보이나요"], usePhoto: "이 사진 사용", retakeOne: "다시 촬영",
     working: "3D 모델을 만드는 중…", checkTitle: "확인", checkHint: "분홍색 선은 3D 모델의 윤곽입니다. 발 가장자리에 붙어 있어야 합니다.",
     fitGood: "잘 맞습니다", fitPoor: "잘 맞지 않습니다. 다시 찍는 것을 권합니다.", toResult: "결과 보기", retakeFoot: "다시 찍기", savePhotos: "사진 저장",
     errFoot: "발을 찾지 못했습니다. 발을 점선에 맞추고 밝은 곳에서 다시 찍어 주세요.", stageBad: "실패", detail: "자세히",
@@ -38,13 +39,14 @@ const TXT = {
     infoTitle: "基本信息", infoSub: "用来确定脚的大小。", code: "参与者编号", codeHint: "研究者给你的编号（不要填姓名）",
     age: "年龄", height: "身高 (cm)", weight: "体重 (kg)", shoe: "鞋码 (mm)", shoeHint: "例如 265", cont: "继续",
     L: "左脚", R: "右脚", stepOf: "步", photos: "张照片",
-    t_top: "从正上方拍", t_side: "从外侧拍", t_inner: "从内侧拍",
+    t_top: "从正上方拍", t_arch: "从内侧斜上方拍", t_side: "贴地从侧面拍",
     d_top: "手机与地面平行，举在脚的正上方拍。脚尖对齐虚线上端，让脚落在虚线里。",
-    d_side: "手机竖直立在靠近地面的位置，正对脚的外侧（小脚趾一侧）拍。脚跟到脚尖都要落在虚线里。",
-    d_inner: "手机竖直立在靠近地面的位置，正对脚的内侧（大脚趾、足弓一侧）拍。脚跟到脚尖都要落在虚线里。",
+    d_arch: "手机竖着拿，从脚的内侧（大脚趾一侧）斜着往下拍。脚尖朝上，把脚对准虚线，距离约 30 cm。",
+    d_side: "手机横过来，放低到贴近地面，让脚的内侧（足弓一侧）朝向镜头，从侧面拍。脚底对齐黄线。",
     prep: "赤脚，裤腿卷到小腿，脚平放在地上。地面颜色和肤色差别越大越准。",
     begin: "开始拍摄", shoot: "拍照", pick: "选择照片", camFail: "无法打开相机，请用“选择照片”。",
-    tilt: "倾斜", flat: "水平", upright: "竖直", fitGuide: "把脚对准虚线",
+    angleOk: "很好，就在这个位置拍", angleBad: "请调整手机角度", target: "目标", fitGuide: "把脚对准虚线",
+    reviewTitle: "确认照片", checks: ["整只脚都在画面里", "照片清晰、对上焦", "脚上没有很重的阴影", "脚跟和所有脚趾都看得见"], usePhoto: "使用这张", retakeOne: "重拍",
     working: "正在生成 3D 模型…", checkTitle: "检查", checkHint: "粉色线是 3D 模型的轮廓，应当贴着脚的边缘。",
     fitGood: "匹配良好", fitPoor: "匹配不理想，建议重拍。", toResult: "查看结果", retakeFoot: "重拍", savePhotos: "保存照片",
     errFoot: "没有找到脚。请把脚对准虚线，在光线充足的地方重拍。", stageBad: "未通过", detail: "详细信息",
@@ -62,13 +64,14 @@ const TXT = {
     infoTitle: "Your details", infoSub: "Used to set the size of the foot.", code: "Participant code", codeHint: "The code the researcher gave you (not your name)",
     age: "Age", height: "Height (cm)", weight: "Weight (kg)", shoe: "Shoe size (mm)", shoeHint: "e.g. 265", cont: "Continue",
     L: "Left foot", R: "Right foot", stepOf: "step", photos: "photos",
-    t_top: "Photo from above", t_side: "Photo from the outer side", t_inner: "Photo from the inner side",
+    t_top: "Photo from above", t_arch: "Inner side, from above at an angle", t_side: "Side view at floor level",
     d_top: "Hold the phone level, straight above the foot. Put the toe tips at the top of the dashed outline and keep the foot inside it.",
-    d_side: "Stand the phone upright close to the floor, facing the outer side of the foot (little toe side). Heel to toes must lie inside the dashed outline.",
-    d_inner: "Stand the phone upright close to the floor, facing the inner side of the foot (big toe and arch side). Heel to toes must lie inside the dashed outline.",
+    d_arch: "Hold the phone upright on the inner (big toe) side of the foot and look down at an angle. Toes at the top; line the foot up with the dashed outline, about 30 cm away.",
+    d_side: "Turn the phone sideways and lower it to the floor, with the inner (arch) side of the foot facing the camera. Put the sole on the yellow line.",
     prep: "Barefoot, trousers rolled up to the calf, foot flat on the floor. A floor that differs in colour from skin gives better results.",
     begin: "Start photos", shoot: "Take photo", pick: "Choose photo", camFail: "Cannot open the camera. Use Choose photo.",
-    tilt: "Tilt", flat: "level", upright: "upright", fitGuide: "Line the foot up with the dashed outline",
+    angleOk: "Good. Take the photo from here", angleBad: "Adjust the phone angle", target: "target", fitGuide: "Line the foot up with the dashed outline",
+    reviewTitle: "Check the photo", checks: ["The whole foot is in the frame", "The photo is sharp and in focus", "No strong shadow on the foot", "The heel and all toes are visible"], usePhoto: "Use this photo", retakeOne: "Retake",
     working: "Building the 3D model…", checkTitle: "Check", checkHint: "The pink line is the outline of the 3D model. It should follow the edge of the foot.",
     fitGood: "Good match", fitPoor: "Poor match. Retaking is recommended.", toResult: "See result", retakeFoot: "Retake", savePhotos: "Save photos",
     errFoot: "The foot was not found. Line the foot up with the dashed outline, in good light, and retake.", stageBad: "failed", detail: "Details",
@@ -107,6 +110,10 @@ function loadUrl(url) {
 function drawGuide(g, name, side, w, h) {                   // dashed outline of an average foot of this size
   const pts = FIT.guideOutline(MODEL, name, side, FL(), w, h), r = Math.max(1.5, w / 260);
   g.fillStyle = "rgba(255,255,255,.95)"; pts.forEach((p, i) => { if (i % 3 !== 2) { g.beginPath(); g.arc(p[0], p[1], r, 0, 7); g.fill(); } });
+  if (name === "side" && pts.length) {                      // where the sole should rest
+    const y = Math.max(...pts.map((p) => p[1])); g.strokeStyle = "#facc15"; g.lineWidth = 2 * r; g.setLineDash([6 * r, 4 * r]);
+    g.beginPath(); g.moveTo(0.04 * w, y); g.lineTo(0.96 * w, y); g.stroke(); g.setLineDash([]);
+  }
 }
 
 /* ---------------------------------------------------------------- screens */
@@ -144,7 +151,7 @@ function info() {
   };
 }
 
-let stream = null, liveTimer = 0, tiltHandler = null, tilt = null;
+let stream = null, liveTimer = 0, tiltHandler = null, pitch = null;
 const openCamera = async () => { try { stream = stream || await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); } catch (e) { stream = null; } };
 function stopCamera() {
   clearInterval(liveTimer); liveTimer = 0; if (stream) stream.getTracks().forEach((x) => x.stop()); stream = null;
@@ -168,10 +175,10 @@ function capture() {
   clearInterval(liveTimer);
   const { name, side } = S.queue[S.q];
   app().innerHTML = `<h2>${t(side)} · ${t("t_" + name)}</h2><p class="small">${S.q + 1} / ${S.queue.length} · ${t("fitGuide")}</p>
-    ${stream ? `<div class="stage"><video id="v" playsinline autoplay muted></video><canvas class="ov" id="ov"></canvas></div><p>${t("tilt")}: <span class="tilt" id="st">–</span></p><button class="go" id="shoot">${t("shoot")}</button>` : `<p class="warn">${t("camFail")}</p>`}
+    ${stream ? `<div class="stage"><video id="v" playsinline autoplay muted></video><canvas class="ov" id="ov"></canvas></div><p><span class="tilt" id="st">–</span></p><button class="go" id="shoot">${t("shoot")}</button>` : `<p class="warn">${t("camFail")}</p>`}
     <label class="btn">${t("pick")}<input type="file" accept="image/*" id="file" hidden></label>`;
-  const got = (cv) => { clearInterval(liveTimer); S.shots[side][name] = { name, cv, img: pixels(cv), tilt_deg: tilt == null ? null : +tilt.toFixed(1) }; next(); };
-  $("file").onchange = (e) => { const f = e.target.files[0]; if (f) loadUrl(URL.createObjectURL(f)).then(got); };
+  const got = (cv) => { clearInterval(liveTimer); review({ name, cv, img: pixels(cv), pitch: pitch == null ? null : +pitch.toFixed(1) }, side); };
+  $("file").onchange = (e) => { const f = e.target.files[0]; if (f) { const m = /_p(\d+)/.exec(f.name); pitch = m ? +m[1] : null; loadUrl(URL.createObjectURL(f)).then(got); } };
   if (!stream) return;
   const v = $("v"), ov = $("ov"); v.srcObject = stream; let drawn = "";
   liveTimer = setInterval(() => {                           // the outline follows the camera's frame shape
@@ -180,14 +187,26 @@ function capture() {
     drawGuide(ov.getContext("2d"), name, side, ov.width, ov.height);
   }, 300);
   if (tiltHandler) window.removeEventListener("deviceorientation", tiltHandler);
-  tiltHandler = (e) => {                                    // top: screen facing up; sides: screen upright
+  const [lo, hi] = FIT.PITCH_OK[name]; pitch = null;
+  $("st").textContent = `– (${t("target")} ${lo}–${hi}°)`;
+  tiltHandler = (e) => {                                    // how steeply the camera looks down: 90 = straight down, 0 = level
     if (e.beta == null || !$("st")) return;
-    const fromFlat = Math.acos(Math.min(1, Math.abs(Math.cos(e.beta * Math.PI / 180) * Math.cos(e.gamma * Math.PI / 180)))) * 180 / Math.PI;
-    tilt = name === "top" ? fromFlat : Math.abs(90 - fromFlat);
-    $("st").textContent = `${tilt.toFixed(0)}° (${t(name === "top" ? "flat" : "upright")})`; $("st").className = "tilt " + (tilt < 8 ? "ok" : tilt < 15 ? "warn" : "bad");
+    pitch = 90 - Math.acos(Math.min(1, Math.abs(Math.cos(e.beta * Math.PI / 180) * Math.cos(e.gamma * Math.PI / 180)))) * 180 / Math.PI;
+    const ok = pitch >= lo && pitch <= hi;
+    $("st").textContent = `${pitch.toFixed(0)}° (${t("target")} ${lo}–${hi}°) · ${t(ok ? "angleOk" : "angleBad")}`; $("st").className = "tilt " + (ok ? "ok" : "bad");
+    document.querySelector(".stage").className = "stage " + (ok ? "good" : "off");
   };
   window.addEventListener("deviceorientation", tiltHandler);
   $("shoot").onclick = () => got(toCanvas(v));
+}
+
+function review(shot, side) {                               // look at the photo before it is used
+  app().innerHTML = `<h2>${t("reviewTitle")}</h2><p class="small">${t(side)} · ${t("t_" + shot.name)}${shot.pitch == null ? "" : " · " + shot.pitch.toFixed(0) + "°"}</p><canvas id="rv"></canvas>
+    <div class="card">${t("checks").map((c) => `<p>✓ ${c}</p>`).join("")}</div>
+    <div class="row"><button id="re">${t("retakeOne")}</button><button class="go" id="use">${t("usePhoto")}</button></div>`;
+  const c = $("rv"), k = 640 / Math.max(shot.cv.width, shot.cv.height); c.width = Math.round(shot.cv.width * k); c.height = Math.round(shot.cv.height * k); c.getContext("2d").drawImage(shot.cv, 0, 0, c.width, c.height);
+  c.style.maxHeight = "52vh"; c.style.width = "auto"; c.style.margin = "0 auto";
+  $("re").onclick = capture; $("use").onclick = () => { S.shots[side][shot.name] = shot; next(); };
 }
 
 function next() {
@@ -213,7 +232,7 @@ function build() {
 
 function savePhotos() {                                     // the photos as taken, to send to the researcher when something fails
   const all = []; for (const s of ["L", "R"]) for (const n of STEPS) if (S.shots[s][n]) all.push([s, S.shots[s][n]]);
-  Promise.all(all.map(([s, sh]) => new Promise((ok) => sh.cv.toBlob((bl) => ok(new File([bl], `${S.subject || "foot"}_${s}_${sh.name}.jpg`, { type: "image/jpeg" })), "image/jpeg", 0.92)))).then((files) => {
+  Promise.all(all.map(([s, sh]) => new Promise((ok) => sh.cv.toBlob((bl) => ok(new File([bl], `${S.subject || "foot"}_${s}_${sh.name}${sh.pitch == null ? "" : "_p" + Math.round(sh.pitch)}.jpg`, { type: "image/jpeg" })), "image/jpeg", 0.92)))).then((files) => {
     if (navigator.canShare && navigator.canShare({ files })) return navigator.share({ files }).catch(() => {});
     files.forEach((f, i) => setTimeout(() => { const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name; a.click(); }, 400 * i));
   });
@@ -243,7 +262,7 @@ function check() {
       const W = FIT.toWorld(FIT.footVerts(MODEL, r.foot_length, r.coef), r.foot_length, side, r.place);
       shots.forEach((sh) => { const v = r.views.find((x) => x.name === sh.name); jobs.push(() => (v ? drawCheck($(`k_${side}_${sh.name}`), sh, v, W) : drawShot($(`k_${side}_${sh.name}`), sh))); });
       S.feet[side] = Object.assign({}, r.measures, { length_source: "shoe_size", shape: { coef: r.coef.map((c) => +c.toFixed(3)) },
-        quality: { outline_match: +iou.toFixed(3), photos: r.views.map((v) => v.name), camera_mm: r.views.map((v) => v.camera_mm), tilt_deg: shots.map((sh) => sh.tilt_deg) } });
+        quality: { outline_match: +iou.toFixed(3), photos: r.views.map((v) => v.name), camera_mm: r.views.map((v) => v.camera_mm), pitch_deg: shots.map((sh) => sh.pitch) } });
     }
     html += `<button id="re_${side}">${t(side)} · ${t("retakeFoot")}</button>`;
   }
@@ -317,11 +336,11 @@ function summary() {
 /* For tests: run from photo URLs without the camera.  urls = {L: {top, side, inner}, R: {...}} */
 async function runUrls(urls, info) {
   Object.assign(S.info, { subject: "TEST", shoe_size_mm: 250 }, info || {}); S.subject = S.info.subject; S.shots = { L: {}, R: {} }; S.feet = {}; S.fits = {};
-  for (const side of Object.keys(urls)) for (const name of Object.keys(urls[side])) { const cv = await loadUrl(urls[side][name]); S.shots[side][name] = { name, cv, img: pixels(cv), tilt_deg: null }; }
+  for (const side of Object.keys(urls)) for (const name of Object.keys(urls[side])) { const cv = await loadUrl(urls[side][name]); const m = /_p(\d+)/.exec(urls[side][name]); S.shots[side][name] = { name, cv, img: pixels(cv), pitch: m ? +m[1] : null }; }
   for (const side of Object.keys(urls)) S.fits[side] = FIT.reconstructFree(STEPS.filter((n) => S.shots[side][n]).map((n) => S.shots[side][n]), side, MODEL, FL());
   check(); return S.fits;
 }
 
-window.FC = { S, loadUrl, pixels, exportData, home, info, explain, capture, check, summary, runUrls, viewerFeet, model: () => MODEL };
+window.FC = { review, S, loadUrl, pixels, exportData, home, info, explain, capture, check, summary, runUrls, viewerFeet, model: () => MODEL };
 home();
-fetch("footmodel.json?v=3d4").then((r) => r.json()).then((j) => { MODEL = FIT.loadModel(j); if ($("agree")) home(); });
+fetch("footmodel.json?v=3d5").then((r) => r.json()).then((j) => { MODEL = FIT.loadModel(j); if ($("agree")) home(); });

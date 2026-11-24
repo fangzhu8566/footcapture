@@ -588,12 +588,18 @@
     return { R, t: [-(R[0] * C[0] + R[1] * C[1] + R[2] * C[2]), -(R[3] * C[0] + R[4] * C[1] + R[5] * C[2]), -(R[6] * C[0] + R[7] * C[1] + R[8] * C[2])], f, cx: w / 2, cy: h / 2 };
   }
 
-  /* Where the camera is when the foot fills the dashed outline.  The foot stands at the origin, toes towards +X. */
-  function guideCam(name, side, FL, w, h, f) {
-    f = f || 0.85 * Math.max(w, h); const m = side === "L" ? -1 : 1;
-    if (name === "top") return lookAt([0, 0, f * FL / ((h >= w ? 0.62 : 0.8) * h)], [0, 0, 0], [1, 0, 0], f, w, h);
-    const d = f * FL / ((h >= w ? 0.8 : 0.62) * w);
-    return lookAt([0, (name === "inner" ? 1 : -1) * m * d, 0.4 * FL], [0, 0, 0.15 * FL], [0, 0, 1], f, w, h);
+  /* Where the camera is when the foot fills the dashed outline.  The foot stands at the origin, toes towards +X.
+     top:  phone almost level above the foot (looking down at about 80 deg), toes at the top of the picture;
+     arch: phone held upright on the inner (big toe) side, looking down at about 65 deg, toes at the top;
+     side: phone turned sideways and lowered to the floor, the inner side of the foot facing the camera.
+     pitch = how steeply the camera looks down, in degrees (90 = straight down); from the phone's tilt sensor when known. */
+  const PITCH = { top: 80, arch: 65, side: 8 }, PITCH_OK = { top: [75, 85], arch: [60, 70], side: [0, 15] };
+  function guideCam(name, side, FL, w, h, f, pitch) {
+    f = f || 0.85 * Math.max(w, h); const m = side === "L" ? -1 : 1, p = (pitch == null ? PITCH[name] : Math.min(89, Math.max(0, pitch))) * Math.PI / 180;
+    if (name === "side") { const d = f * FL / ((h >= w ? 0.8 : 0.62) * w); return lookAt([0, m * d * Math.cos(p), 0.15 * FL + d * Math.sin(p)], [0, 0, 0.15 * FL], [0, 0, 1], f, w, h); }
+    const d = f * FL / ((h >= w ? 0.62 : 0.8) * h);
+    if (name === "top") return lookAt([-d * Math.cos(p), 0, d * Math.sin(p)], [0, 0, 0], [1, 0, 0], f, w, h);
+    return lookAt([0, m * d * Math.cos(p), d * Math.sin(p)], [0, 0, 0], [1, 0, 0], f, w, h);
   }
   const ORIGIN = { tx: 0, ty: 0, yaw: 0 };
 
@@ -657,7 +663,7 @@
   function fitFree(views, M, side, FL, opt) {
     opt = opt || {};
     const K = Math.min(opt.modes == null ? M.K : opt.modes, M.K), V = new Float32Array(M.nv * 3), Wd = new Float32Array(M.nv * 3), pts = new Float32Array(M.nv * 2);
-    const prior = opt.prior == null ? 0.004 : opt.prior, camPrior = opt.camPrior == null ? 0.08 : opt.camPrior;
+    const prior = opt.prior == null ? 0.012 : opt.prior, camPrior = opt.camPrior == null ? 0.08 : opt.camPrior;
     const st = views.map((v) => ({ cam0: v.cam, x: [0, 0, 0, 0, 0, 0], m: new Uint8Array(v.w * v.h), d: new Float32Array(v.w * v.h), t: new Float32Array(v.w * v.h), idx: null }));
     const coef = new Array(K).fill(0);
     const camOf = (s, x) => {
@@ -704,13 +710,13 @@
       }
       return vs;
     };
-    let views = seg((ph) => ({ cam: guideCam(ph.name, side, FL, ph.img.w, ph.img.h, opt.f) }));
+    let views = seg((ph) => ({ cam: guideCam(ph.name, side, FL, ph.img.w, ph.img.h, opt.f, ph.pitch) }));
     for (const ph of photos) if (diag[ph.name].stage !== "ok") bad.push(ph.name);
     if (views.length < 2) return { error: "foot", bad, diag };
     let fit = fitFree(views, M, side, FL, opt);
     if (opt.rounds !== 1) {                                   // second look: cut the foot out again around the fitted model
       const W1 = toWorld(footVerts(M, FL, fit.coef), FL, side, ORIGIN), cams = {}; views.forEach((v) => (cams[v.name] = v.cam));
-      const v2 = seg((ph) => ({ cam: cams[ph.name] || guideCam(ph.name, side, FL, ph.img.w, ph.img.h, opt.f), verts: cams[ph.name] ? W1 : null }));
+      const v2 = seg((ph) => ({ cam: cams[ph.name] || guideCam(ph.name, side, FL, ph.img.w, ph.img.h, opt.f, ph.pitch), verts: cams[ph.name] ? W1 : null }));
       if (v2.length >= 2) { views = v2; fit = fitFree(views, M, side, FL, opt); }
     }
     views.forEach((v) => { v.camera_mm = camCentre(v.cam).map((x) => Math.round(x)); });
@@ -718,6 +724,6 @@
   }
 
 
-  const api = { guideCam, guideOutline, segmentGuided, fitFree, reconstructFree, orderQuad, A4L, A4S, PAPER, shrink, detectQuad, solvePose, estimateFocal, segmentView, loadModel, footVerts, toWorld, renderMask, legMask, fitShape, measure, measureVerts, reconstruct, project, camCentre, lm };
+  const api = { PITCH, PITCH_OK, guideCam, guideOutline, segmentGuided, fitFree, reconstructFree, orderQuad, A4L, A4S, PAPER, shrink, detectQuad, solvePose, estimateFocal, segmentView, loadModel, footVerts, toWorld, renderMask, legMask, fitShape, measure, measureVerts, reconstruct, project, camCentre, lm };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.FIT = api;
 })(typeof window !== "undefined" ? window : globalThis);
