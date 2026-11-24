@@ -15,7 +15,6 @@
   button, .btn { display:block; width:100%; padding:13px; margin:8px 0; border-radius:10px; border:1px solid var(--line);
     background:#fff; color:var(--ink); font:inherit; font-weight:600; text-align:center; cursor:pointer; }
   button.go { background:var(--go); border-color:var(--go); color:#fff; } button:disabled { opacity:.45; }
-  .row { display:flex; gap:8px; } .row > * { flex:1; }
   input[type=text] { width:100%; padding:11px; border:1px solid var(--line); border-radius:10px; font:inherit; }
   canvas { width:100%; height:auto; display:block; border-radius:10px; background:#111; touch-action:none; }
   .stage { position:relative; } .stage video { width:100%; display:block; border-radius:10px; background:#111; }
@@ -25,10 +24,16 @@
   td:first-child, th:first-child { text-align:left; color:var(--mute); font-weight:400; }
   .lang { display:flex; gap:6px; justify-content:flex-end; } .lang button { width:auto; padding:4px 10px; margin:0; font-weight:400; }
   .small { font-size:13px; }
+  .side { display:flex; gap:12px; align-items:center; } .side svg { flex:none; } .side ol, .side p { flex:1; min-width:0; }
+  .thumbs { display:flex; gap:6px; } .thumbs canvas { flex:1; min-width:0; }
+  canvas.gl { height:min(78vw, 400px); background:#eef1f5; border:1px solid var(--line); }
+  .views { display:flex; gap:6px; } .views button { padding:8px 4px; margin:8px 0 0; font-weight:400; }
 </style>
 </head>
 <body>
 <main id="app"></main>
-<script src="app.js"></script>
+<script src="fit.js?v=3d1"></script>
+<script src="viewer.js?v=3d1"></script>
+<script src="app.js?v=3d1"></script>
 </body>
 </html>
