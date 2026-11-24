@@ -538,7 +538,7 @@
       if (z != null) arch = Math.max(arch, z);
     }
     const r1 = (v) => Math.round(v * 10) / 10;
-    return { foot_length_mm: r1(FL), forefoot_width_mm: r1(width(0.55, 0.85, 0.14 * FL)), heel_width_mm: r1(width(0.05, 0.25, 0.14 * FL)),
+    return { foot_length_mm: r1(FL), toe_width_mm: r1(width(0.92, 0.95, 0.14 * FL)), arch_ratio_pct: r1(arch / FL * 100), forefoot_width_mm: r1(width(0.55, 0.85, 0.14 * FL)), heel_width_mm: r1(width(0.05, 0.25, 0.14 * FL)),
       instep_height_mm: r1(top(0.5)), arch_height_mm: r1(arch), ball_girth_mm: r1(girth(0.7)), instep_girth_mm: r1(girth(0.5)) };
   }
 
@@ -578,6 +578,146 @@
     return pts.slice().sort((a, b) => Math.atan2(b[1] - cy, b[0] - cx) - Math.atan2(a[1] - cy, a[0] - cx));
   }
 
-  const api = { orderQuad, A4L, A4S, PAPER, shrink, detectQuad, solvePose, estimateFocal, segmentView, loadModel, footVerts, toWorld, renderMask, legMask, fitShape, measure, measureVerts, reconstruct, project, camCentre, lm };
+  /* ============================================================ paper-free flow
+     No sheet of paper: the foot is lined up with a dashed outline on the screen, the size comes from
+     the shoe size typed in, and three photos (top, outer side, inner side) give the shape. */
+
+  function lookAt(C, T, up, f, w, h) {
+    const nrm = (v) => { const m = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / m, v[1] / m, v[2] / m]; }, cr = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const z = nrm([T[0] - C[0], T[1] - C[1], T[2] - C[2]]), x = nrm(cr(z, up)), y = cr(z, x), R = [x[0], x[1], x[2], y[0], y[1], y[2], z[0], z[1], z[2]];
+    return { R, t: [-(R[0] * C[0] + R[1] * C[1] + R[2] * C[2]), -(R[3] * C[0] + R[4] * C[1] + R[5] * C[2]), -(R[6] * C[0] + R[7] * C[1] + R[8] * C[2])], f, cx: w / 2, cy: h / 2 };
+  }
+
+  /* Where the camera is when the foot fills the dashed outline.  The foot stands at the origin, toes towards +X. */
+  function guideCam(name, side, FL, w, h, f) {
+    f = f || 0.85 * Math.max(w, h); const m = side === "L" ? -1 : 1;
+    if (name === "top") return lookAt([0, 0, f * FL / ((h >= w ? 0.62 : 0.8) * h)], [0, 0, 0], [1, 0, 0], f, w, h);
+    const d = f * FL / ((h >= w ? 0.8 : 0.62) * w);
+    return lookAt([0, (name === "inner" ? 1 : -1) * m * d, 0.4 * FL], [0, 0, 0.15 * FL], [0, 0, 1], f, w, h);
+  }
+  const ORIGIN = { tx: 0, ty: 0, yaw: 0 };
+
+  /* Dashed outline to draw on the camera view: points [x, y] in photo pixels along the mean foot's outline. */
+  function guideOutline(M, name, side, FL, w, h) {
+    const cam = guideCam(name, side, FL, w, h), k = Math.max(1, Math.round(Math.max(w, h) / 240)), v = { x0: 0, y0: 0, k, w: Math.floor(w / k), h: Math.floor(h / k), cam };
+    const m = renderMask(v, toWorld(footVerts(M, FL, []), FL, side, ORIGIN), M.tris, new Uint8Array(v.w * v.h)), pts = [];
+    for (let y = 1; y < v.h - 1; y++) for (let x = 1; x < v.w - 1; x++) { const p = y * v.w + x; if (m[p] && !(m[p - 1] && m[p + 1] && m[p - v.w] && m[p + v.w])) pts.push([(x + 0.5) * k, (y + 0.5) * k]); }
+    return pts;
+  }
+
+  /* Foot against any floor.  Colours well inside the expected outline teach what the foot looks like, colours
+     well outside teach the background; every pixel in between goes to the side it resembles, then both
+     colour tables are learnt again from the result. */
+  function segmentGuided(img, cam, M, FL, side, seedVerts) {
+    const W0 = seedVerts || toWorld(footVerts(M, FL, []), FL, side, ORIGIN);
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (let i = 0; i < W0.length; i += 3) { const p = project(cam, W0[i], W0[i + 1], W0[i + 2]); if (p[2] <= 1) continue; x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
+    const padX = 0.3 * (x1 - x0), padY = 0.3 * (y1 - y0), len = Math.max(x1 - x0, y1 - y0);
+    x0 = Math.max(0, Math.floor(x0 - padX)); y0 = Math.max(0, Math.floor(y0 - padY)); x1 = Math.min(img.w, Math.ceil(x1 + padX)); y1 = Math.min(img.h, Math.ceil(y1 + padY));
+    const k = Math.max(1, Math.ceil(Math.max(x1 - x0, y1 - y0) / 260)), w = Math.floor((x1 - x0) / k), h = Math.floor((y1 - y0) / k), n = w * h;
+    if (!(w >= 20 && h >= 20)) return null;
+    const view = { x0, y0, k, w, h, cam }, d = img.data, bin = new Int32Array(n), NR = 20, NG = 20, NV = 8, NB = NR * NG * NV;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0;
+      for (let j = 0; j < k; j++) { let i = ((y0 + y * k + j) * img.w + x0 + x * k) * 4; for (let q = 0; q < k; q++, i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; } }
+      const s = r + g + b + 1e-6, V = Math.max(r, g, b) / (k * k);
+      const ri = Math.min(NR - 1, Math.max(0, Math.floor((r / s - 0.2) / 0.4 * NR))), gi = Math.min(NG - 1, Math.max(0, Math.floor((g / s - 0.2) / 0.3 * NG))), vi = Math.min(NV - 1, Math.floor(V / 256 * NV));
+      bin[y * w + x] = (ri * NG + gi) * NV + vi;
+    }
+    const m0 = renderMask(view, W0, M.tris, new Uint8Array(n)), leg = legMask(view, M, FL, side, ORIGIN), rr = Math.max(2, Math.round(len / k * (seedVerts ? 0.035 : 0.07)));
+    const fgSeed = morph(m0, w, h, rr, true), far = morph(m0, w, h, Math.round((seedVerts ? 1.6 : 2.2) * rr), false);
+    const lab = new Int8Array(n);                            // 1 foot, -1 background, 0 undecided
+    for (let p = 0; p < n; p++) lab[p] = leg[p] ? 0 : fgSeed[p] ? 1 : !far[p] ? -1 : 0;
+    const P = new Float32Array(n), tmp = new Float32Array(n);
+    const learn = (sel) => {
+      const H = new Float32Array(NB), S = new Float32Array(NB); let tot = 0;
+      for (let p = 0; p < n; p++) if (sel(p)) { H[bin[p]]++; tot++; }
+      for (let a = 0; a < NR; a++) for (let b = 0; b < NG; b++) for (let c = 0; c < NV; c++) {       // soften: neighbouring colours count a little
+        let s = 0; for (let da = -1; da <= 1; da++) for (let db = -1; db <= 1; db++) for (let dc = -1; dc <= 1; dc++) { const A = a + da, B = b + db, C = c + dc; if (A < 0 || B < 0 || C < 0 || A >= NR || B >= NG || C >= NV) continue; s += H[(A * NG + B) * NV + C] * (da || db || dc ? 0.35 : 1); }
+        S[(a * NG + b) * NV + c] = s;
+      }
+      for (let i = 0; i < NB; i++) S[i] = (S[i] + 0.02) / (tot + 1); return S;
+    };
+    let cur = lab;
+    for (let it = 0; it < 3; it++) {
+      const Hf = learn((p) => cur[p] > 0 && !leg[p]), Hb = learn((p) => cur[p] < 0 && !leg[p]);
+      for (let p = 0; p < n; p++) P[p] = lab[p] > 0 ? 1 : lab[p] < 0 ? 0 : Hf[bin[p]] / (Hf[bin[p]] + Hb[bin[p]]);
+      boxBlur(P, w, h, 2, tmp);
+      const nxt = new Int8Array(n); for (let p = 0; p < n; p++) nxt[p] = lab[p] || (P[p] > 0.5 ? 1 : -1); cur = nxt;
+    }
+    let m = new Uint8Array(n); for (let p = 0; p < n; p++) m[p] = cur[p] > 0 ? 1 : 0;
+    m = morph(morph(m, w, h, 1, true), w, h, 1, false);
+    const comp = largestComponent(m, w, h), O = new Float32Array(n), Wt = new Float32Array(n);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const p = y * w + x; O[p] = comp.mask[p]; Wt[p] = x > 1 && y > 1 && x < w - 2 && y < h - 2 ? 1 : 0; }
+    let seedArea = 0; for (let p = 0; p < n; p++) seedArea += m0[p];
+    return Object.assign(view, { O, Wt, area: comp.area, seedArea });
+  }
+
+  /* Fit the foot's shape to the three outlines; each photo's camera may move away from where the guide put it. */
+  function fitFree(views, M, side, FL, opt) {
+    opt = opt || {};
+    const K = Math.min(opt.modes == null ? M.K : opt.modes, M.K), V = new Float32Array(M.nv * 3), Wd = new Float32Array(M.nv * 3), pts = new Float32Array(M.nv * 2);
+    const prior = opt.prior == null ? 0.004 : opt.prior, camPrior = opt.camPrior == null ? 0.08 : opt.camPrior;
+    const st = views.map((v) => ({ cam0: v.cam, x: [0, 0, 0, 0, 0, 0], m: new Uint8Array(v.w * v.h), d: new Float32Array(v.w * v.h), t: new Float32Array(v.w * v.h), idx: null }));
+    const coef = new Array(K).fill(0);
+    const camOf = (s, x) => {
+      const D = rodrigues(x), R0 = s.cam0.R, R = new Array(9);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) R[i * 3 + j] = D[i * 3] * R0[j] + D[i * 3 + 1] * R0[3 + j] + D[i * 3 + 2] * R0[6 + j];
+      return Object.assign({}, s.cam0, { R, t: [s.cam0.t[0] + x[3] * FL, s.cam0.t[1] + x[4] * FL, s.cam0.t[2] + x[5] * FL] });
+    };
+    const setVerts = (c) => { footVerts(M, FL, c, V); toWorld(V, FL, side, ORIGIN, Wd); };
+    const freeze = () => views.forEach((v, i) => { v.cam = camOf(st[i], st[i].x); const leg = legMask(v, M, FL, side, ORIGIN), idx = []; for (let q = 0; q < v.w * v.h; q++) if (v.Wt[q] && !leg[q]) idx.push(q); st[i].idx = Int32Array.from(idx); });
+    const viewRes = (i, cam, blur, out, o) => {
+      const v = views[i], s = st[i], sc = 1 / Math.sqrt(s.idx.length || 1); v.cam = cam; renderMask(v, Wd, M.tris, s.m, pts);
+      for (let q = 0; q < s.d.length; q++) s.d[q] = (s.m[q] - v.O[q]) * v.Wt[q];
+      boxBlur(s.d, v.w, v.h, blur, s.t); if (blur > 1) boxBlur(s.d, v.w, v.h, blur, s.t);
+      for (let q = 0; q < s.idx.length; q++) out[o + q] = s.d[s.idx[q]] * sc; return o + s.idx.length;
+    };
+    for (const [blur, kk] of [[6, 0], [4, Math.min(2, K)], [3, K], [2, K], [2, K]]) {
+      freeze(); setVerts(coef);
+      views.forEach((v, i) => {                               // this photo's camera
+        const s = st[i], fn = (x) => { const r = new Float32Array(s.idx.length + 6); viewRes(i, camOf(s, x), blur, r, 0); for (let j = 0; j < 6; j++) r[s.idx.length + j] = camPrior * x[j] * (j < 3 ? 3 : 4); return r; };
+        s.x = lm(fn, s.x, [0.01, 0.01, 0.01, 0.01, 0.01, 0.02], { lo: [-0.45, -0.45, -0.45, -0.6, -0.6, -0.6], hi: [0.45, 0.45, 0.45, 0.6, 0.6, 0.9], iters: 12 }).x;
+        v.cam = camOf(s, s.x);
+      });
+      if (!kk) continue;
+      freeze(); const cams = views.map((v) => v.cam), tot = st.reduce((a, s) => a + s.idx.length, 0);
+      const fn = (c) => { const r = new Float32Array(tot + kk); let o = 0; setVerts(c); for (let i = 0; i < views.length; i++) o = viewRes(i, cams[i], blur, r, o); for (let j = 0; j < kk; j++) r[o + j] = prior * c[j] * Math.sqrt(views.length); return r; };
+      const c = lm(fn, coef.slice(0, kk), new Array(kk).fill(0.5), { lo: new Array(kk).fill(-2.5), hi: new Array(kk).fill(2.5), iters: 10 }).x;
+      for (let j = 0; j < kk; j++) coef[j] = c[j];
+    }
+    freeze(); setVerts(coef);
+    const iou = views.map((v, i) => { const s = st[i]; renderMask(v, Wd, M.tris, s.m, pts); let a = 0, u = 0; for (const q of s.idx) { const mm = s.m[q], oo = v.O[q] > 0.5; if (mm && oo) a++; if (mm || oo) u++; } return u ? a / u : 0; });
+    return { foot_length: FL, coef, place: ORIGIN, iou };
+  }
+
+  /* photos: [{name: "top"|"side"|"inner", img}], FL = foot length in mm from the shoe size. */
+  function reconstructFree(photos, side, M, FL, opt) {
+    opt = opt || {};
+    const diag = {}, bad = [];
+    const seg = (seedOf) => {
+      const vs = [];
+      for (const ph of photos) {
+        const sd = seedOf(ph), v = segmentGuided(ph.img, sd.cam, M, FL, side, sd.verts), share = v ? v.area / Math.max(1, v.seedArea) : 0;
+        diag[ph.name] = { stage: v && share > 0.35 && share < 2.6 ? "ok" : "foot", foot_vs_guide: +share.toFixed(2) };
+        if (diag[ph.name].stage === "ok") { v.name = ph.name; vs.push(v); }
+      }
+      return vs;
+    };
+    let views = seg((ph) => ({ cam: guideCam(ph.name, side, FL, ph.img.w, ph.img.h, opt.f) }));
+    for (const ph of photos) if (diag[ph.name].stage !== "ok") bad.push(ph.name);
+    if (views.length < 2) return { error: "foot", bad, diag };
+    let fit = fitFree(views, M, side, FL, opt);
+    if (opt.rounds !== 1) {                                   // second look: cut the foot out again around the fitted model
+      const W1 = toWorld(footVerts(M, FL, fit.coef), FL, side, ORIGIN), cams = {}; views.forEach((v) => (cams[v.name] = v.cam));
+      const v2 = seg((ph) => ({ cam: cams[ph.name] || guideCam(ph.name, side, FL, ph.img.w, ph.img.h, opt.f), verts: cams[ph.name] ? W1 : null }));
+      if (v2.length >= 2) { views = v2; fit = fitFree(views, M, side, FL, opt); }
+    }
+    views.forEach((v) => { v.camera_mm = camCentre(v.cam).map((x) => Math.round(x)); });
+    return Object.assign(fit, { side, views, bad, diag, measures: measure(M, FL, fit.coef) });
+  }
+
+
+  const api = { guideCam, guideOutline, segmentGuided, fitFree, reconstructFree, orderQuad, A4L, A4S, PAPER, shrink, detectQuad, solvePose, estimateFocal, segmentView, loadModel, footVerts, toWorld, renderMask, legMask, fitShape, measure, measureVerts, reconstruct, project, camCentre, lm };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.FIT = api;
 })(typeof window !== "undefined" ? window : globalThis);
