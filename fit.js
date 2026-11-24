@@ -103,36 +103,46 @@
 
   /* ------------------------------------------------------------ the sheet of paper */
 
-  function paperBlob(small) {                               // bright, unsaturated; shadowed paper joins by region growing
-    const w = small.w, h = small.h, d = small.data, n = w * h, V = new Uint8Array(n), S = new Float32Array(n), hist = new Uint32Array(256);
-    for (let i = 0, p = 0; p < n; i += 4, p++) {
-      const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
-      V[p] = mx; hist[mx]++; S[p] = mx ? (mx - mn) / mx : 0;
+  /* The sheet = the brightest even patch near the middle of the picture, grown outwards pixel by pixel
+     while the colour stays that of the paper and changes smoothly.  Growth stops at the sheet's edge,
+     where brightness jumps, whatever the floor looks like; soft shadows on the paper are crossed. */
+  function paperBlob(small, relaxed) {
+    const w = small.w, h = small.h, d = small.data, n = w * h, V = new Uint8Array(n), hist = new Uint32Array(256);
+    const x0 = Math.round(0.1 * w), x1 = Math.round(0.9 * w), y0 = Math.round(0.12 * h), y1 = Math.round(0.88 * h);
+    let cnt = 0;
+    for (let p = 0, i = 0; p < n; p++, i += 4) { V[p] = Math.max(d[i], d[i + 1], d[i + 2]); const x = p % w, y = (p - x) / w; if (x >= x0 && x < x1 && y >= y0 && y < y1) { hist[V[p]]++; cnt++; } }
+    let acc = 0, Vp = 255; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc > 0.03 * cnt) { Vp = v; break; } }
+    const diff = (p, q) => Math.max(Math.abs(d[p * 4] - d[q * 4]), Math.abs(d[p * 4 + 1] - d[q * 4 + 1]), Math.abs(d[p * 4 + 2] - d[q * 4 + 2]));
+    const seed = new Uint8Array(n);
+    for (let y = Math.max(1, y0); y < Math.min(h - 1, y1); y++) for (let x = Math.max(1, x0); x < Math.min(w - 1, x1); x++) {
+      const p = y * w + x; if (V[p] > 0.88 * Vp && diff(p, p - 1) < 10 && diff(p, p + 1) < 10 && diff(p, p - w) < 10 && diff(p, p + w) < 10) seed[p] = 1;
     }
-    let acc = 0, p95 = 255; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc > 0.03 * n) { p95 = v; break; } }
-    const m = new Uint8Array(n);
-    for (let p = 0; p < n; p++) m[p] = V[p] > 0.62 * p95 && S[p] < 0.25 ? 1 : 0;
-    const core = largestComponent(morph(morph(m, w, h, 1, true), w, h, 1, false), w, h);
-    if (core.area < 0.02 * n) return core;
-    let x0 = w, x1 = 0, y0 = h, y1 = 0;
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (core.mask[y * w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-    const gx = Math.round(0.6 * (x1 - x0)) + 4, gy = Math.round(0.6 * (y1 - y0)) + 4;      // other pieces of the sheet lie close by
-    for (let p = 0; p < n; p++) { const x = p % w, y = (p - x) / w; m[p] = V[p] > 0.4 * p95 && S[p] < 0.25 && x >= x0 - gx && x <= x1 + gx && y >= y0 - gy && y <= y1 + gy ? 1 : 0; }
-    const open = morph(morph(m, w, h, 1, true), w, h, 1, false), lab = new Int32Array(n), stack = new Int32Array(n), out = new Uint8Array(n);
-    let cur = 0, area = 0;
-    for (let s = 0; s < n; s++) {
-      if (!open[s] || lab[s]) continue;
-      cur++; let top = 0, cnt = 0, bright = 0; const first = s; stack[top++] = s; lab[s] = cur; const members = [];
+    const core = largestComponent(seed, w, h); if (core.area < 0.004 * n) return { mask: core.mask, area: 0 };
+    let sr = 0, sg = 0, sb = 0; for (let p = 0; p < n; p++) if (core.mask[p]) { sr += d[p * 4]; sg += d[p * 4 + 1]; sb += d[p * 4 + 2]; }
+    sr /= core.area; sg /= core.area; sb /= core.area;
+    const ss = sr + sg + sb, rp = sr / ss, gp = sg / ss, Vc = Math.max(sr, sg, sb), tl = Math.max(6, 0.035 * Vc);
+    const like = (p) => { const r = d[p * 4], g = d[p * 4 + 1], b = d[p * 4 + 2], s = r + g + b + 1e-6; return V[p] > 0.4 * Vc && Math.hypot(r / s - rp, g / s - gp) < 0.03; };
+    const out = new Uint8Array(n), stack = new Int32Array(n); let top = 0, area = 0;
+    for (let p = 0; p < n; p++) if (seed[p] && Math.abs(d[p * 4] - sr) < 14 && Math.abs(d[p * 4 + 1] - sg) < 14 && Math.abs(d[p * 4 + 2] - sb) < 14) { out[p] = 1; stack[top++] = p; }   // every bright piece of paper, also beyond the leg
+    while (top) {
+      const p = stack[--top], x = p % w; area++;
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) if (q >= 0 && q < n && !out[q] && like(q) && diff(p, q) < tl) { out[q] = 1; stack[top++] = q; }
+    }
+    if (relaxed) {                                            // paper in hard shadow: same hue, darker, close to the bright part
+      let bx0 = w, bx1 = 0, by0 = h, by1 = 0;
+      for (let p = 0; p < n; p++) if (out[p]) { const x = p % w, y = (p - x) / w; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+      const gx = Math.round(0.35 * (bx1 - bx0)) + 3, gy = Math.round(0.35 * (by1 - by0)) + 3;
+      for (let p = 0; p < n; p++) if (out[p]) stack[top++] = p;
       while (top) {
-        const p = stack[--top], x = p % w; cnt++; members.push(p); if (V[p] > 0.62 * p95) bright++;
-        if (x > 0 && open[p - 1] && !lab[p - 1]) { lab[p - 1] = cur; stack[top++] = p - 1; }
-        if (x < w - 1 && open[p + 1] && !lab[p + 1]) { lab[p + 1] = cur; stack[top++] = p + 1; }
-        if (p >= w && open[p - w] && !lab[p - w]) { lab[p - w] = cur; stack[top++] = p - w; }
-        if (p < n - w && open[p + w] && !lab[p + w]) { lab[p + w] = cur; stack[top++] = p + w; }
+        const p = stack[--top], x = p % w;
+        for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
+          if (q < 0 || q >= n || out[q] || !like(q)) continue; const qx = q % w, qy = (q - qx) / w;
+          if (qx < bx0 - gx || qx > bx1 + gx || qy < by0 - gy || qy > by1 + gy) continue;
+          out[q] = 1; stack[top++] = q; area++;
+        }
       }
-      if (cnt >= 0.012 * core.area && bright >= 0.3 * cnt) { for (const p of members) out[p] = 1; area += cnt; }   // a piece of sheet has bright paper in it
     }
-    return { mask: out, area };
+    return { mask: morph(morph(out, w, h, 1, true), w, h, 1, false), area };
   }
 
   function convexHull(pts) {
@@ -158,8 +168,8 @@
   /* Four edge lines of the sheet from the parts of its outline that are really visible.  The convex
      hull of the paper pixels bridges whatever the foot and leg hide; hull stretches with no paper
      pixels next to them are bridges, not edges, and are ignored. */
-  function paperLines(small) {
-    const w = small.w, h = small.h, blob = paperBlob(small);
+  function paperLines(small, relaxed) {
+    const w = small.w, h = small.h, blob = paperBlob(small, relaxed);
     if (blob.area < 0.03 * w * h) return null;
     const m = blob.mask, pts = [];
     for (let y = 0; y < h; y++) { let a = -1, b = -1; for (let x = 0; x < w; x++) if (m[y * w + x]) { if (a < 0) a = x; b = x; } if (a >= 0) { pts.push([a, y]); if (b > a) pts.push([b, y]); } }
@@ -210,7 +220,7 @@
       if (!ok) continue;
       let best = -1, bt = 0; const sc = [];
       for (let t = 3; t < prof.length - 3; t++) { const v = (prof[t - 1] + prof[t - 2] + prof[t - 3]) - (prof[t] + prof[t + 1] + prof[t + 2]); sc.push(v); if (v > best) { best = v; bt = t; } }
-      if (best < 3 * 40) continue;                           // no clear white -> dark step here (foot or shadow in the way)
+      if (best < 3 * 14) continue;                           // no clear white -> dark step here (foot or shadow in the way)
       const i = bt - 3, a = sc[i - 1], b = sc[i], c = sc[i + 1]; let sub = 0; if (i > 0 && i < sc.length - 1 && a - 2 * b + c < 0) sub = 0.5 * (a - c) / (a - 2 * b + c);
       const tt = bt + sub - 0.5 - (R + 3); P.push([px + L.n[0] * tt, py + L.n[1] * tt]);
     }
@@ -224,11 +234,11 @@
     return F;
   }
 
-  /* Corners of the sheet in photo pixels, counter-clockwise on screen, or null.  quick = preview quality. */
-  function detectQuad(img, quick) {
-    const k = Math.max(1, Math.round(Math.max(img.w, img.h) / 420)), small = shrink(img, k), pl = paperLines(small);
-    if (!pl) return null;
-    let L = pl.lines.map((l) => { if (!quick) { const r = refineLine(img, l, k); if (r) return r; } return { n: l.n, d: l.d * k + (k - 1) / 2 * (l.n[0] + l.n[1]) }; });
+  /* Corners of the sheet in photo pixels, counter-clockwise on screen, or null.  quick = preview quality.
+     A result counts only if the four corners can be a real A4 sheet seen by a camera. */
+  function quadFrom(img, small, k, quick, relaxed) {
+    const pl = paperLines(small, relaxed); if (!pl) return null;
+    const L = pl.lines.map((l) => { if (!quick) { const r = refineLine(img, l, k); if (r) return r; } return { n: l.n, d: l.d * k + (k - 1) / 2 * (l.n[0] + l.n[1]) }; });
     const c = []; for (let i = 0; i < 4; i++) { const p = intersect(L[i], L[(i + 1) % 4]); if (!p) return null; c.push(p); }
     let area = 0; for (let i = 0; i < 4; i++) { const a = c[i], b = c[(i + 1) % 4]; area += a[0] * b[1] - a[1] * b[0]; }
     area = Math.abs(area) / 2;
@@ -238,8 +248,16 @@
       const a = c[i], b = c[(i + 1) % 4], e = c[(i + 2) % 4];
       if ((b[0] - a[0]) * (e[1] - b[1]) - (b[1] - a[1]) * (e[0] - b[0]) > 0) return null;
     }
-    return c;
+    let err = 1e9; for (const q of [0.65, 0.8, 1.0, 1.25]) { const p = solvePose(c, q * span, img.w, img.h); if (p && p.err < err) err = p.err; }
+    return { c, err: err / span };
   }
+  function detectQuad(img, quick) {
+    const k = Math.max(1, Math.round(Math.max(img.w, img.h) / 420)), small = shrink(img, k);
+    let best = quadFrom(img, small, k, quick, false);
+    if (!best || best.err > 0.003) { const alt = quadFrom(img, small, k, quick, true); if (alt && (!best || alt.err < best.err)) best = alt; }
+    return best && best.err < POSE_GATE ? best.c : null;
+  }
+  const POSE_GATE = 0.012;                                  // corner misfit allowed, as a share of the photo's long side
 
   /* ------------------------------------------------------------ camera */
 
@@ -340,11 +358,11 @@
       for (const e of E) if (e[0] * (px - e[2][0]) + e[1] * (py - e[2][1]) < margin) { ok = 0; break; }
       inside[y * w + x] = ok;
     }
-    const vals = []; for (let p = 0; p < n; p++) if (inside[p]) { const o = p * 3, mx = Math.max(rgb[o], rgb[o + 1], rgb[o + 2]), mn = Math.min(rgb[o], rgb[o + 1], rgb[o + 2]); if (mx > 0 && (mx - mn) / mx < 0.2) vals.push(mx); }
+    const vals = []; for (let p = 0; p < n; p++) if (inside[p]) vals.push(Math.max(rgb[p * 3], rgb[p * 3 + 1], rgb[p * 3 + 2]));
     if (vals.length < 50) return null;
-    vals.sort((a, b) => a - b); const Vp = vals[Math.floor(0.8 * vals.length)];
-    let sr = 0, sg = 0, sn = 0;                              // colour of bright paper
-    for (let p = 0; p < n; p++) if (inside[p]) { const o = p * 3, mx = Math.max(rgb[o], rgb[o + 1], rgb[o + 2]), mn = Math.min(rgb[o], rgb[o + 1], rgb[o + 2]); if (mx > 0.8 * Vp && (mx - mn) / mx < 0.2) { const s = rgb[o] + rgb[o + 1] + rgb[o + 2]; sr += rgb[o] / s; sg += rgb[o + 1] / s; sn++; } }
+    vals.sort((a, b) => a - b); const Vp = vals[Math.floor(0.85 * vals.length)];       // paper is the bright part of what lies inside the sheet
+    let sr = 0, sg = 0, sn = 0;                              // its colour under this light, whatever the white balance
+    for (let p = 0; p < n; p++) if (inside[p]) { const o = p * 3, mx = Math.max(rgb[o], rgb[o + 1], rgb[o + 2]); if (mx > 0.9 * Vp) { const q = rgb[o] + rgb[o + 1] + rgb[o + 2]; sr += rgb[o] / q; sg += rgb[o + 1] / q; sn++; } }
     const rp = sr / sn, gp = sg / sn, D = new Float32Array(n), dark = new Uint8Array(n), hist = new Float64Array(64);
     for (let p = 0; p < n; p++) if (inside[p]) {
       const o = p * 3, s = rgb[o] + rgb[o + 1] + rgb[o + 2] + 1e-6, r = rgb[o] / s, g = rgb[o + 1] / s, mx = Math.max(rgb[o], rgb[o + 1], rgb[o + 2]);
@@ -531,22 +549,28 @@
   /* photos: [{name: "front"|"medial"|"lateral"|"back", img, quad?}] -> fitted foot, or {error}. */
   function reconstruct(photos, side, M, opt) {
     opt = opt || {};
-    const used = [], bad = [];
-    for (const ph of photos) { const quad = ph.quad || detectQuad(ph.img); if (quad) used.push(Object.assign({}, ph, { quad })); else bad.push(ph.name); }
-    if (used.length < 2) return { error: "paper", bad };
+    const used = [], bad = [], diag = {};
+    for (const ph of photos) { const quad = ph.quad || detectQuad(ph.img); if (quad) used.push(Object.assign({}, ph, { quad })); else { bad.push(ph.name); diag[ph.name] = { stage: "paper" }; } }
+    if (used.length < 2) return { error: "paper", bad, diag };
     const w = used[0].img.w, h = used[0].img.h, same = used.every((u) => u.img.w === w && u.img.h === h);
     const focal = opt.f ? { f: opt.f } : estimateFocal(same ? used.map((u) => u.quad) : [used[0].quad], w, h), views = [];
     for (const u of used) {
-      let cam = solvePose(u.quad, focal.f * Math.max(u.img.w, u.img.h) / Math.max(w, h), u.img.w, u.img.h); if (!cam || cam.err > 4) { bad.push(u.name); continue; }
+      const span = Math.max(u.img.w, u.img.h), d = diag[u.name] = { stage: "ok" };
+      let cam = solvePose(u.quad, focal.f * span / Math.max(w, h), u.img.w, u.img.h);
+      d.pose_err_px = cam ? +cam.err.toFixed(1) : null;
+      if (!cam || cam.err > 1.5 * POSE_GATE * span) { bad.push(u.name); d.stage = "pose"; continue; }      // the four corners cannot be an A4 sheet
       const e = EXPECT[u.name] || [1, 0], m = side === "L" && e[0] === 0 ? -1 : 1, C = camCentre(cam);
       if (C[0] * e[0] + C[1] * e[1] * m < 0) cam = halfTurn(cam);
-      const seg = segmentView(u.img, u.quad, opt.maxSide || 280); if (!seg || seg.area < 0.01 * seg.w * seg.h) { bad.push(u.name); continue; }
+      const seg = segmentView(u.img, u.quad, opt.maxSide || 280);
+      d.foot_share = seg ? +(seg.area / (seg.w * seg.h)).toFixed(3) : null; if (seg) d.threshold = +seg.threshold.toFixed(4);
+      if (!seg || seg.area < 0.01 * seg.w * seg.h) { bad.push(u.name); d.stage = "foot"; continue; }
       seg.cam = cam; seg.name = u.name; seg.quad = u.quad; seg.camera_mm = camCentre(cam).map((v) => Math.round(v));
       views.push(seg);
     }
-    if (views.length < 2) return { error: "foot", bad };
+    const stages = Object.values(diag).map((d) => d.stage);
+    if (views.length < 2) return { error: stages.includes("foot") ? "foot" : stages.includes("pose") ? "pose" : "paper", bad, diag, focal_px: focal.f };
     const fit = fitShape(views, M, side, opt);
-    return Object.assign(fit, { side, focal_px: focal.f, views, bad, measures: measure(M, fit.foot_length, fit.coef) });
+    return Object.assign(fit, { side, focal_px: focal.f, views, bad, diag, measures: measure(M, fit.foot_length, fit.coef) });
   }
 
   function orderQuad(pts) {                                 // any four corners -> counter-clockwise on screen, as detectQuad gives them
